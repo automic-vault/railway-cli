@@ -1,3 +1,23 @@
+# Automic Vault Fork Notes
+
+This repository is the Automic Vault fork of Railway CLI.
+
+Automic Vault is a macOS-first system that keeps developer credentials in
+custody and applies them only after policy or the user allows the complete
+operation requested by verified software.
+
+The [Railway CLI Isotope work](https://github.com/automic-vault/automic-vault/pull/190)
+routes OAuth access-token and refresh-token reads, rotation, and logout through
+Automic Vault's authenticated XPC service while retaining only markers on disk.
+Automic Vault's reviewed release workflow builds and signs the pinned executable
+with Hardened Runtime; the Hardener verifies its release digest and Automic
+Vault signature before installation.
+
+This source fork alone does not establish Hardened State. The remainder of this
+README is the original upstream Railway CLI README.
+
+---
+
 # Railway CLI
 
 The Railway CLI lets you interact with your Railway projects from the command line. Read the [CLI documentation](https://docs.railway.com/cli).
