@@ -1,0 +1,27 @@
+name:
+  isotope:railway-cli
+
+replaces:
+  brew:railway
+
+build: |
+  cargo +1.96.0 test --locked config::tests::av_custody_round_trip_never_writes_plaintext
+  cargo +1.96.0 build --locked --release --bin railway
+  mkdir -p bin
+  cp target/release/railway bin/railway
+  codesign --force --options runtime --timestamp \
+    --identifier railway \
+    --sign "$CODESIGN_IDENTITY" \
+    bin/railway
+  tar czf out.tgz bin/railway
+
+justification:
+  title:
+    Unprotected Credential Access
+  detail: |
+    Upstream Railway CLI stores OAuth access and refresh tokens in plaintext
+    on disk.
+
+    This isotope routes credential reads, rotation, and logout through Automic
+    Vault's authenticated XPC service while retaining only markers on disk.
+    Plaintext and partially migrated credentials fail closed.
