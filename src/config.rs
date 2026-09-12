@@ -824,7 +824,7 @@ impl Configs {
         if let Some(defaults) = self.root_config.agent_bootstrap_defaults.as_mut() {
             defaults.remove(&key);
         }
-        self.write_value(&serde_json::to_value(&self.root_config)?)
+        self.write_non_credentials(false)
     }
 
     /// Persist just this preference against the latest config snapshot.
@@ -845,8 +845,7 @@ impl Configs {
             defaults.insert(key.clone(), id.to_owned());
         }
         let selected = defaults.get(&key).is_some_and(|value| value == id);
-        // This snapshot was reloaded under the lock, including credentials.
-        self.write_value(&serde_json::to_value(&self.root_config)?)?;
+        self.write_non_credentials(false)?;
         Ok(selected)
     }
 
@@ -1073,16 +1072,22 @@ impl Configs {
     /// another process in the meantime. Credentials belong to the auth paths, so
     /// an ordinary write never carries them: see [`Self::write_credentials`].
     pub fn write(&self) -> Result<()> {
+        self.write_non_credentials(true)
+    }
+
+    fn write_non_credentials(&self, preserve_agent_bootstrap_defaults: bool) -> Result<()> {
         let mut to_write = serde_json::to_value(&self.root_config)?;
         // Re-read immediately before writing so the window in which a
         // concurrent refresh could be lost is microseconds rather than the
         // lifetime of this `Configs`.
         if let Some(disk) = Self::read_root_config(&self.root_config_path) {
-            // A TUI can keep an older config alive while its bootstrap form
-            // saves a preference through a separate instance. Only the
-            // dedicated setter owns this field.
-            to_write["agentBootstrapDefaults"] =
-                serde_json::to_value(disk.agent_bootstrap_defaults)?;
+            if preserve_agent_bootstrap_defaults {
+                // A TUI can keep an older config alive while its bootstrap form
+                // saves a preference through a separate instance. Only the
+                // dedicated setter owns this field.
+                to_write["agentBootstrapDefaults"] =
+                    serde_json::to_value(disk.agent_bootstrap_defaults)?;
+            }
             // Merge on the typed struct so the field set is checked by the
             // compiler: a new credential field on `RailwayUser` is picked up
             // automatically instead of being silently dropped. Everything that
@@ -1303,8 +1308,8 @@ mod tests {
         assert!(has_credentials);
     }
 
-    #[test]
-    fn av_custody_round_trip_never_writes_plaintext() {
+    #[tokio::test]
+    async fn av_custody_round_trip_never_writes_plaintext() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.json");
         let mut configs = Configs::for_test(path.clone());
@@ -1322,6 +1327,24 @@ mod tests {
             Some("access-secret")
         );
         assert_eq!(reloaded.get_refresh_token(), Some("refresh-secret"));
+
+        reloaded
+            .set_agent_bootstrap_default("environment-id", "bootstrap-id", false)
+            .await
+            .unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("access-secret") && !raw.contains("refresh-secret"));
+        assert_eq!(raw.matches(AV_CREDENTIAL_MARKER).count(), 2);
+        assert!(raw.contains("bootstrap-id"));
+
+        reloaded
+            .clear_agent_bootstrap_default("environment-id")
+            .await
+            .unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(!raw.contains("access-secret") && !raw.contains("refresh-secret"));
+        assert_eq!(raw.matches(AV_CREDENTIAL_MARKER).count(), 2);
+        assert!(!raw.contains("bootstrap-id"));
 
         std::fs::write(
             &path,
